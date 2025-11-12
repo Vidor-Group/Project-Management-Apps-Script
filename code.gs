@@ -577,7 +577,7 @@ function str_(v) {
 function extractEmailsFromCell_(rawText, rich) {
   const out = new Set();
 
-  // Try RichText runs (chips/links)
+  // 1) Try RichText runs (chips/links)
   if (rich && typeof rich.getText === 'function') {
     try {
       if (typeof rich.getRuns === 'function') {
@@ -598,10 +598,10 @@ function extractEmailsFromCell_(rawText, rich) {
     } catch (_) {}
   }
 
-  // Parse plain text fallback (comma/semicolon/space separated)
+  // 2) Parse plain text fallback (comma/semicolon/space separated)
   (parseEmails_(rawText) || []).forEach(e => out.add(e.toLowerCase()));
 
-  // If still empty, attempt resolving display names via Admin Directory
+  // 3) If still empty, attempt resolving display names via Admin Directory
   if (out.size === 0 && rich && typeof rich.getText === 'function') {
     const display = (rich.getText && rich.getText()) || String(rawText || '');
     findDirectoryEmailsByName_(display).forEach(e => out.add(e));
