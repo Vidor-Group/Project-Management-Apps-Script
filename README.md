@@ -263,11 +263,12 @@ Run these from the Apps Script editor to diagnose issues:
 | Function | Purpose |
 |----------|---------|
 | `test_ServiceAccountKey()` | Verify service account credentials are valid |
+| `test_DirectoryPing()` | Basic check: can we list any users from Admin Directory? |
 | `test_TasksImpersonation()` | Test access to Google Tasks for current user |
 | `test_CreateTaskForUser()` | Create a test task due tomorrow |
 | `test_CreateCalendarEvent()` | Create a test calendar event |
 | `test_AssigneeChipParsing(rowNumber)` | Test email extraction for a specific row |
-| `test_DirectoryLookupByName()` | Test name-to-email resolution |
+| `test_DirectoryLookupByName()` | Test name-to-email resolution (update names first) |
 
 ### Common Issues
 
