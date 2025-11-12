@@ -114,14 +114,12 @@ function refreshDeadlineAndFormatting() {
 function syncTasksToCalendar() {
   const { sheet, headers, values, richValues } = getSheetAndHeaders_({ includeValues: true });
   const locating = locateDeadline_(sheet, headers, values);
-  const assignedRaw  = row[headers['Assigned To (email)']];
-  const assignedRich = richValues ? richValues[r][headers['Assigned To (email)']] : null;
-  const guestEmails  = extractEmailsFromCell_(str_(assignedRaw), assignedRich);
 
-
+  // Ensure named range & conditional formatting
   if (locating.deadlineRange) ensureDeadlineNamedRange_(locating.deadlineRange);
   ensureEndDateConditionalFormatting_(sheet, headers, locating.firstTaskRow);
 
+  // Ensure helper columns
   const eventIdColIndex  = ensureColumn_(sheet, headers, CONFIG.eventIdHeader);
   const lastSyncColIndex = ensureColumn_(sheet, headers, CONFIG.lastSyncedHeader);
   const taskIdsColIndex  = ensureColumn_(sheet, headers, CONFIG.taskIdsHeader);
@@ -139,15 +137,15 @@ function syncTasksToCalendar() {
 
     try {
       const start = toDate_(row[headers['Start Date']], tz);
-      if (!start) { log_('skip', r+1, rawTitle, '', 'No start date'); continue; }
+      if (!start) { log_('skip', r + 1, rawTitle, '', 'No start date'); continue; }
 
       const endInclusive = isDate_(row[headers['End Date']])
         ? toDate_(row[headers['End Date']], tz)
-        : addDays_(start, Math.max(1, Number(row[headers['Duration (days)']]||1)) - 1);
+        : addDays_(start, Math.max(1, Number(row[headers['Duration (days)']] || 1)) - 1);
 
       const endExclusive = addDays_(endInclusive, 1);
 
-      // row-level or project deadline
+      // Row-level or project deadline
       const rowDeadlineCell = headers[CONFIG.deadlineHeader] != null ? row[headers[CONFIG.deadlineHeader]] : '';
       const projectDeadline = locating.deadlineDate;
       const rowDeadline = isDate_(rowDeadlineCell) ? stripTime_(new Date(rowDeadlineCell)) : projectDeadline;
@@ -157,8 +155,9 @@ function syncTasksToCalendar() {
       const titleForEvent = CONFIG.addEmojiPrefix ? `${colorInfo.emoji} ${rawTitle}` : rawTitle;
 
       const dependsOn = str_(row[headers['Depends On']]);
-      const status = str_(row[headers['Status']]);
-      const notes = str_(row[headers['Notes']]);
+      const status    = str_(row[headers['Status']]);
+      const notes     = str_(row[headers['Notes']]);
+
       let description = buildDescription_({ dependsOn, status, notes });
       if (rowDeadline) {
         description += (description ? '\n' : '') +
@@ -166,10 +165,14 @@ function syncTasksToCalendar() {
           `Days before deadline: ${daysBefore}`;
       }
 
-      const guestEmails = parseEmails_(str_(row[headers['Assigned To (email)']]));
+      // ✅ People chips + plain emails (use richValues for this row)
+      const assigneeRaw  = row[headers['Assigned To (email)']];
+      const assigneeRich = richValues ? richValues[r][headers['Assigned To (email)']] : null;
+      const guestEmails  = extractEmailsFromCell_(str_(assigneeRaw), assigneeRich);
+
       const existingEventId = row[eventIdColIndex] ? String(row[eventIdColIndex]).trim() : '';
 
-      // CREATE/UPDATE CAL EVENT (with invites, reminders, color, sendUpdates)
+      // Create/Update calendar event
       const event = upsertAllDayEvent_({
         cal,
         existingEventId,
@@ -181,16 +184,16 @@ function syncTasksToCalendar() {
         colorInfo
       });
 
-      // Save ID & stamp
+      // Save event id & stamp
       sheet.getRange(r + 1, eventIdColIndex + 1).setValue(event.getId());
       sheet.getRange(r + 1, lastSyncColIndex + 1).setValue(new Date());
 
-      // PERSONAL TASKS per assignee (DWD)
+      // Per-assignee Google Tasks (DWD)
       const existingMap = parseJsonSafe_(row[taskIdsColIndex]) || {};
       if (CONFIG.createGoogleTasks && guestEmails.length) {
         const updatedMap = upsertTasksForAssignees_({
           assignees: guestEmails,
-          baseTitle: rawTitle,                 // no emoji in personal task
+          baseTitle: rawTitle, // No emoji in personal task
           dueDate: endInclusive,
           sheetName: sheet.getName(),
           eventId: event.getId(),
@@ -199,10 +202,9 @@ function syncTasksToCalendar() {
         sheet.getRange(r + 1, taskIdsColIndex + 1).setValue(JSON.stringify(updatedMap));
       }
 
-      log_('upsert', r+1, rawTitle, event.getId(), `color=${colorInfo.name}; guests=${guestEmails.join(',')}`);
-
+      log_('upsert', r + 1, rawTitle, event.getId(), `color=${colorInfo.name}; guests=${guestEmails.join(',')}`);
     } catch (e) {
-      log_('error', r+1, str_(values[r][headers['Task']]), '', e && e.message ? e.message : String(e));
+      log_('error', r + 1, str_(values[r][headers['Task']]), '', e && e.message ? e.message : String(e));
     }
   }
 
