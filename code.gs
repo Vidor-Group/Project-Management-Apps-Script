@@ -381,41 +381,73 @@ function getAdminDirectoryToken_() {
   return getSATokenForUser_(admin, 'https://www.googleapis.com/auth/admin.directory.user.readonly');
 }
 
+// Basic sanity check: can we list any users?
+function test_DirectoryPing() {
+  const token = getAdminDirectoryToken_();
+  const url = 'https://admin.googleapis.com/admin/directory/v1/users'
+            + '?customer=my_customer&maxResults=5&viewType=admin_view'
+            + '&fields=users(primaryEmail,name/fullName)';
+  const res = UrlFetchApp.fetch(url, { headers: { Authorization: `Bearer ${token}` }, muteHttpExceptions: true });
+  Logger.log(res.getResponseCode());
+  Logger.log(res.getContentText());
+}
+
 /**
- * Resolve one or more display names (comma/semicolon separated) to primary emails
- * via Admin Directory search. Prefers exact full-name match; falls back to first result.
+ * Normalize display text from a chip cell to a set of candidate names.
+ * - strips @
+ * - splits by commas/semicolons/newlines
+ * - collapses spaces
+ */
+function _normalizeDisplayNames_(displayText) {
+  if (!displayText) return [];
+  return displayText
+    .replace(/@/g, ' ')
+    .split(/[\n,;]+/)
+    .map(s => s.trim().replace(/\s+/g, ' '))
+    .filter(Boolean);
+}
+
+/**
+ * Resolve one or more display names to emails via Admin Directory.
+ * Uses the correct "query" param, admin_view, and customer=my_customer.
+ * Prefers exact fullName match; falls back to first result.
  */
 function findDirectoryEmailsByName_(displayText) {
-  const names = (displayText || '')
-    .split(/[,;]+/).map(s => s.trim()).filter(Boolean);
+  const names = _normalizeDisplayNames_(displayText);
   if (!names.length) return [];
 
   const token = getAdminDirectoryToken_();
+  const base = 'https://admin.googleapis.com/admin/directory/v1/users';
   const out = new Set();
 
   names.forEach(name => {
-    const url = 'https://admin.googleapis.com/admin/directory/v1/users' +
-                '?maxResults=5&viewType=domain_public' +
-                '&fields=users(primaryEmail,name/fullName),nextPageToken' +
-                '&q=' + encodeURIComponent(`name:${name}`);
+    // Try quoted full-name first (exact-ish), then unquoted if needed
+    const queries = [
+      `name:"${name}"`,
+      `name:${name}`
+    ];
 
-    try {
-      const res = UrlFetchApp.fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-        muteHttpExceptions: true
-      });
-      if (res.getResponseCode() !== 200) {
-        log_('dir_warn', 0, name, '', `HTTP ${res.getResponseCode()}: ${res.getContentText()}`);
-        return;
+    let found = null;
+    for (let i = 0; i < queries.length && !found; i++) {
+      const url = `${base}?customer=my_customer&maxResults=5&viewType=admin_view`
+                + `&fields=users(primaryEmail,name/fullName)`
+                + `&query=${encodeURIComponent(queries[i])}`;
+      try {
+        const res = UrlFetchApp.fetch(url, { headers: { Authorization: `Bearer ${token}` }, muteHttpExceptions: true });
+        if (res.getResponseCode() !== 200) {
+          log_('dir_warn', 0, name, '', `HTTP ${res.getResponseCode()}: ${res.getContentText()}`);
+          continue;
+        }
+        const users = (JSON.parse(res.getContentText()).users || []);
+        // prefer exact case-insensitive fullName match; else take first
+        found = users.find(u => ((u.name && u.name.fullName) || '').toLowerCase() === name.toLowerCase()) || users[0];
+      } catch (e) {
+        log_('dir_error', 0, name, '', String(e));
       }
-      const users = (JSON.parse(res.getContentText()).users || []);
-      let match = users.find(u => ((u.name && u.name.fullName) || '').toLowerCase() === name.toLowerCase());
-      if (!match && users.length) match = users[0];
-      if (match && match.primaryEmail) out.add(match.primaryEmail.toLowerCase());
-      else log_('dir_warn', 0, name, '', 'No user match');
-    } catch (e) {
-      log_('dir_error', 0, name, '', String(e));
     }
+
+    if (found && found.primaryEmail) out.add(found.primaryEmail.toLowerCase());
+    else log_('dir_warn', 0, name, '', 'No user match');
   });
 
   return Array.from(out);
