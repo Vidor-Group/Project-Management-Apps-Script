@@ -545,31 +545,35 @@ function str_(v) {
 function extractEmailsFromCell_(rawText, rich) {
   const out = new Set();
 
-  // From RichText (people chips / links / mixed)
+  // Try RichText runs (chips/links)
   if (rich && typeof rich.getText === 'function') {
     try {
-      // Prefer per-run inspection (multiple chips in one cell)
       if (typeof rich.getRuns === 'function') {
         const runs = rich.getRuns() || [];
         runs.forEach(run => {
           try {
             const url = run.getLinkUrl && run.getLinkUrl();
-            if (url && url.indexOf('mailto:') === 0) out.add(url.replace(/^mailto:/, ''));
+            if (url && url.indexOf('mailto:') === 0) out.add(url.replace(/^mailto:/, '').toLowerCase());
             const t = run.getText && run.getText();
-            (parseEmails_(t) || []).forEach(e => out.add(e));
+            (parseEmails_(t) || []).forEach(e => out.add(e.toLowerCase()));
           } catch (_) {}
         });
       } else {
-        // Fallback: whole-cell link
         const url = rich.getLinkUrl && rich.getLinkUrl();
-        if (url && url.indexOf('mailto:') === 0) out.add(url.replace(/^mailto:/, ''));
-        (parseEmails_(rich.getText()) || []).forEach(e => out.add(e));
+        if (url && url.indexOf('mailto:') === 0) out.add(url.replace(/^mailto:/, '').toLowerCase());
+        (parseEmails_(rich.getText()) || []).forEach(e => out.add(e.toLowerCase()));
       }
     } catch (_) {}
   }
 
-  // From raw text fallback (commas / semicolons / spaces)
-  (parseEmails_(rawText) || []).forEach(e => out.add(e));
+  // Parse plain text fallback (comma/semicolon/space separated)
+  (parseEmails_(rawText) || []).forEach(e => out.add(e.toLowerCase()));
+
+  // If still empty, attempt resolving display names via Admin Directory
+  if (out.size === 0 && rich && typeof rich.getText === 'function') {
+    const display = (rich.getText && rich.getText()) || String(rawText || '');
+    findDirectoryEmailsByName_(display).forEach(e => out.add(e));
+  }
 
   return Array.from(out);
 }
