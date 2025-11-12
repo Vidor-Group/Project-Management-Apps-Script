@@ -283,7 +283,8 @@ function upsertTasksForAssignees_({ assignees, baseTitle, dueDate, sheetName, ev
   return updated;
 }
 
-function insertTask_(token, listId, title, notes, dueISO) {
+function insertTask_(token, listId, title, notes, dueDate) {
+  const dueISO = toDueISO_(dueDate);
   const res = UrlFetchApp.fetch(
     `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(listId)}/tasks`,
     {
