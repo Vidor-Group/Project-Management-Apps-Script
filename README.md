@@ -151,9 +151,12 @@ Run these test functions from Apps Script to verify everything works:
 
 1. **Test Service Account**: Run `test_ServiceAccountKey()`
    - Check **Execution log** for ✅ success message
-2. **Test Tasks Access**: Run `test_TasksImpersonation()`
+2. **Test Directory API Access**: Run `test_DirectoryPing()`
+   - Should return HTTP 200 and list of users
+   - If 403, enable Admin SDK API in GCP and Advanced Service in Apps Script
+3. **Test Tasks Access**: Run `test_TasksImpersonation()`
    - Should list your Google Tasks lists
-3. **Test Directory Lookup**: Run `test_DirectoryLookupByName()`
+4. **Test Directory Lookup**: Run `test_DirectoryLookupByName()`
    - Update with actual names from your organization first
 
 ### Step 5: First Sync
