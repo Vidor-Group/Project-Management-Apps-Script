@@ -622,6 +622,12 @@ function test_AssigneeChipParsing(rowNumber1Based) {
   Logger.log(JSON.stringify({ row: rowNumber1Based || (r + 1), emails }));
 }
 
+// 0b) Test: directory lookup by name string(s)
+function test_DirectoryLookupByName() {
+  const emails = findDirectoryEmailsByName_('Chad Stolle; Spencer Lott');
+  Logger.log(JSON.stringify(emails));
+}
+
 // 1) DWD test: list Tasks lists as the active user (or hardcode a user)
 function test_TasksImpersonation() {
   const user = Session.getActiveUser().getEmail();
