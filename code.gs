@@ -165,10 +165,10 @@ function syncTasksToCalendar() {
           `Days before deadline: ${daysBefore}`;
       }
 
-      // ✅ People chips + plain emails (use richValues for this row)
+      // ✅ People-chips + plain emails
       const assigneeRaw  = row[headers['Assigned To (email)']];
       const assigneeRich = richValues ? richValues[r][headers['Assigned To (email)']] : null;
-      const guestEmails  = extractEmailsFromCell_(str_(assigneeRaw), assigneeRich);
+      const guestEmails  = dedupEmails_(extractEmailsFromCell_(str_(assigneeRaw), assigneeRich));
 
       const existingEventId = row[eventIdColIndex] ? String(row[eventIdColIndex]).trim() : '';
 
