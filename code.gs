@@ -374,6 +374,52 @@ function getSATokenForUser_(userEmail, scope) {
   return JSON.parse(res.getContentText()).access_token;
 }
 
+/***** ADMIN DIRECTORY LOOKUP (DWD via SA) *****/
+function getAdminDirectoryToken_() {
+  const admin = PropertiesService.getScriptProperties().getProperty('ADMIN_IMPERSONATE_EMAIL');
+  if (!admin) throw new Error('Missing ADMIN_IMPERSONATE_EMAIL property');
+  return getSATokenForUser_(admin, 'https://www.googleapis.com/auth/admin.directory.user.readonly');
+}
+
+/**
+ * Resolve one or more display names (comma/semicolon separated) to primary emails
+ * via Admin Directory search. Prefers exact full-name match; falls back to first result.
+ */
+function findDirectoryEmailsByName_(displayText) {
+  const names = (displayText || '')
+    .split(/[,;]+/).map(s => s.trim()).filter(Boolean);
+  if (!names.length) return [];
+
+  const token = getAdminDirectoryToken_();
+  const out = new Set();
+
+  names.forEach(name => {
+    const url = 'https://admin.googleapis.com/admin/directory/v1/users' +
+                '?maxResults=5&viewType=domain_public' +
+                '&fields=users(primaryEmail,name/fullName),nextPageToken' +
+                '&q=' + encodeURIComponent(`name:${name}`);
+
+    try {
+      const res = UrlFetchApp.fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        muteHttpExceptions: true
+      });
+      if (res.getResponseCode() !== 200) {
+        log_('dir_warn', 0, name, '', `HTTP ${res.getResponseCode()}: ${res.getContentText()}`);
+        return;
+      }
+      const users = (JSON.parse(res.getContentText()).users || []);
+      let match = users.find(u => ((u.name && u.name.fullName) || '').toLowerCase() === name.toLowerCase());
+      if (!match && users.length) match = users[0];
+      if (match && match.primaryEmail) out.add(match.primaryEmail.toLowerCase());
+      else log_('dir_warn', 0, name, '', 'No user match');
+    } catch (e) {
+      log_('dir_error', 0, name, '', String(e));
+    }
+  });
+
+  return Array.from(out);
+}
 
 /***** DEADLINE LOCATOR *****/
 function locateDeadline_(sheet, headers, valuesOpt) {
