@@ -255,7 +255,7 @@ function upsertTasksForAssignees_({ assignees, baseTitle, dueDate, sheetName, ev
       const token = getSATokenForUser_(email, 'https://www.googleapis.com/auth/tasks');
       const listId = ensureTasksListForUser_(token, listName);
       const notes = `Linked calendar event:\nhttps://calendar.google.com/calendar/u/0/r/eventedit/${encodeURIComponent(eventId)}`;
-      const dueISO = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate()).toISOString();
+      const dueISO = toDueISO_(dueDate);
 
       const existingTaskId = updated[email];
       if (existingTaskId) {
@@ -268,12 +268,12 @@ function upsertTasksForAssignees_({ assignees, baseTitle, dueDate, sheetName, ev
           payload: JSON.stringify({ title: baseTitle, notes, due: dueISO, status: 'needsAction' })
         });
         if (res.getResponseCode() === 404) {
-          updated[email] = insertTask_(token, listId, baseTitle, notes, dueISO);
+          updated[email] = insertTask_(token, listId, baseTitle, notes, dueDate);
         } else if (res.getResponseCode() !== 200) {
           log_('task_error', 0, baseTitle, '', `PATCH ${email}: ${res.getResponseCode()} ${res.getContentText()}`);
         }
       } else {
-        updated[email] = insertTask_(token, listId, baseTitle, notes, dueISO);
+        updated[email] = insertTask_(token, listId, baseTitle, notes, dueDate);
       }
     } catch (e) {
       log_('task_error', 0, baseTitle, '', `${email}: ${e && e.message ? e.message : e}`);
