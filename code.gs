@@ -550,6 +550,16 @@ function openSyncLog_(){ const sh = SpreadsheetApp.getActive().getSheetByName('S
 
 /************ QUICK TESTS ************/
 
+// 0) Test people chip parsing for a specific row
+function test_AssigneeChipParsing(rowNumber1Based) {
+  const { headers, values, richValues } = getSheetAndHeaders_({ includeValues: true });
+  const r = (rowNumber1Based || (CONFIG.headerRow + 2)) - 1; // default: first task row
+  const raw  = values[r][headers['Assigned To (email)']];
+  const rich = richValues[r][headers['Assigned To (email)']];
+  const emails = extractEmailsFromCell_(str_(raw), rich);
+  Logger.log(JSON.stringify({ row: rowNumber1Based || (r + 1), emails }));
+}
+
 // 1) DWD test: list Tasks lists as the active user (or hardcode a user)
 function test_TasksImpersonation() {
   const user = Session.getActiveUser().getEmail();
