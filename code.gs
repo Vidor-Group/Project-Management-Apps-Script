@@ -539,6 +539,17 @@ function colLetter_(n){ let s=''; while(n>0){const m=(n-1)%26; s=String.fromChar
 
 function parseJsonSafe_(v){ try{ return v ? JSON.parse(v) : null; } catch { return null; } }
 
+function toDueISO_(d) {
+  // d is a date with local time cleared by your helpers; make an exact UTC midnight
+  return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())).toISOString();
+}
+
+function dedupEmails_(arr) {
+  const s = new Set();
+  (arr || []).forEach(e => { if (e) s.add(e.toLowerCase()); });
+  return Array.from(s);
+}
+
 function log_(action, row, task, eventId, note) {
   const ss = SpreadsheetApp.getActive();
   const name = 'Sync Log';
