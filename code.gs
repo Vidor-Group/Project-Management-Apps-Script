@@ -112,8 +112,12 @@ function refreshDeadlineAndFormatting() {
 
 /***** MAIN SYNC *****/
 function syncTasksToCalendar() {
-  const { sheet, headers, values } = getSheetAndHeaders_({ includeValues: true });
+  const { sheet, headers, values, richValues } = getSheetAndHeaders_({ includeValues: true });
   const locating = locateDeadline_(sheet, headers, values);
+  const assignedRaw  = row[headers['Assigned To (email)']];
+  const assignedRich = richValues ? richValues[r][headers['Assigned To (email)']] : null;
+  const guestEmails  = extractEmailsFromCell_(str_(assignedRaw), assignedRich);
+
 
   if (locating.deadlineRange) ensureDeadlineNamedRange_(locating.deadlineRange);
   ensureEndDateConditionalFormatting_(sheet, headers, locating.firstTaskRow);
@@ -457,18 +461,17 @@ function getSheetAndHeaders_(opts = {}) {
   const headerVals = headerRange.getValues()[0];
 
   const headers = {};
-  headerVals.forEach((h, i) => {
-    const key = str_(h);
-    if (key) headers[key] = i;
-  });
+  headerVals.forEach((h, i) => { const key = str_(h); if (key) headers[key] = i; });
 
-  ['Task','Depends On','Start Date','Duration (days)','End Date','Assigned To (email)','Status','Notes', CONFIG.deadlineHeader, CONFIG.taskIdsHeader, CONFIG.eventIdHeader, CONFIG.lastSyncedHeader]
+  ['Task','Depends On','Start Date','Duration (days)','End Date','Assigned To (email)','Status','Notes',
+   CONFIG.deadlineHeader, CONFIG.taskIdsHeader, CONFIG.eventIdHeader, CONFIG.lastSyncedHeader]
     .forEach(n => { if (headers[n] == null) headers[n] = ensureColumn_(sheet, headers, n); });
 
   const dataRange = sheet.getDataRange();
   const values = opts.includeValues ? dataRange.getValues() : null;
+  const richValues = opts.includeValues ? dataRange.getRichTextValues() : null;   //  👈 add this
 
-  return { sheet, headers, values };
+  return { sheet, headers, values, richValues };                                    //  👈 and return it
 }
 
 function ensureColumn_(sheet, headers, name) {
@@ -479,7 +482,49 @@ function ensureColumn_(sheet, headers, name) {
   return headers[name];
 }
 
-function str_(v){ return (v == null) ? '' : String(v).trim(); }
+// Returns display text for plain values AND Smart Chips (people chips)
+function str_(v) {
+  if (v == null) return '';
+  if (typeof v === 'object') {
+    try {
+      if (typeof v.getText === 'function') return String(v.getText()).trim(); // RichTextValue
+    } catch (_) {}
+  }
+  return String(v).trim();
+}
+
+function extractEmailsFromCell_(rawText, rich) {
+  const out = new Set();
+
+  // From RichText (people chips / links / mixed)
+  if (rich && typeof rich.getText === 'function') {
+    try {
+      // Prefer per-run inspection (multiple chips in one cell)
+      if (typeof rich.getRuns === 'function') {
+        const runs = rich.getRuns() || [];
+        runs.forEach(run => {
+          try {
+            const url = run.getLinkUrl && run.getLinkUrl();
+            if (url && url.indexOf('mailto:') === 0) out.add(url.replace(/^mailto:/, ''));
+            const t = run.getText && run.getText();
+            (parseEmails_(t) || []).forEach(e => out.add(e));
+          } catch (_) {}
+        });
+      } else {
+        // Fallback: whole-cell link
+        const url = rich.getLinkUrl && rich.getLinkUrl();
+        if (url && url.indexOf('mailto:') === 0) out.add(url.replace(/^mailto:/, ''));
+        (parseEmails_(rich.getText()) || []).forEach(e => out.add(e));
+      }
+    } catch (_) {}
+  }
+
+  // From raw text fallback (commas / semicolons / spaces)
+  (parseEmails_(rawText) || []).forEach(e => out.add(e));
+
+  return Array.from(out);
+}
+
 function equalsCI_(a,b){ return a.toLowerCase() === b.toLowerCase(); }
 function isDate_(v){ return v && Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v); }
 function toDate_(v, tz){ if (isDate_(v)) return stripTime_(new Date(v)); const d=new Date(v); return isNaN(d)?null:stripTime_(d); }
