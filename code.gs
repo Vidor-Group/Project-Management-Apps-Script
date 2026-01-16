@@ -1,84 +1,24 @@
 /*******************************************************
- * Project Timeline → Calendar + Google Tasks Sync
- * - Calendar events with color + emoji by deadline proximity
- * - Guest invites + sendUpdates on change (Advanced Calendar API)
- * - Per-assignee Google Tasks via Domain-Wide Delegation (DWD)
- * - Sync Log sheet + idempotent Task IDs (JSON) column
- * - Conditional formatting for End Date (green/yellow/red)
+ * Project Tasks → Calendar + Google Tasks Sync
+ * - Creates calendar events with task details
+ * - Invites assignees using @Person mentions
+ * - Creates personal Google Tasks via Domain-Wide Delegation
+ * - Sync Log for tracking all operations
  *******************************************************/
-function test_ServiceAccountKey() {
-  try {
-    const props = PropertiesService.getScriptProperties();
-    const clientEmail = props.getProperty('SA_CLIENT_EMAIL');
-    const privateKey = props.getProperty('SA_PRIVATE_KEY');
-    if (!clientEmail || !privateKey) {
-      throw new Error('Missing SA_CLIENT_EMAIL or SA_PRIVATE_KEY in Script Properties');
-    }
-
-    Logger.log('Client Email: ' + clientEmail);
-
-    // Normalize newlines in case key stored as single line
-    const normalizedKey = privateKey.replace(/\\n/g, '\n');
-    const hasEscaped = privateKey.indexOf('\\n') !== -1;
-    const hasReal = normalizedKey.indexOf('\n') !== -1;
-
-    Logger.log('Escaped \\n detected: ' + hasEscaped);
-    Logger.log('Contains real newlines: ' + hasReal);
-    Logger.log('Key length: ' + normalizedKey.length);
-
-    // Try an actual token request (Tasks scope)
-    const token = getSATokenForUser_(Session.getActiveUser().getEmail(), 'https://www.googleapis.com/auth/tasks');
-    Logger.log('Access token retrieved successfully (first 100 chars): ' + token.substring(0, 100));
-
-    Logger.log('✅ Service account key works and token exchange succeeded.');
-  } catch (e) {
-    Logger.log('❌ Service account key test failed: ' + e.message);
-  }
-}
-
-// Choose color/emoji from daysBefore deadline
-function decideColor_(daysBefore) {
-  // No deadline? default green.
-  if (daysBefore === null || daysBefore === undefined) {
-    return { name: 'green', emoji: '🟢', calColor: CalendarApp.EventColor.GREEN };
-  }
-
-  // Deadline logic
-  if (CONFIG.onDeadlineIsRed) {
-    if (daysBefore <= 0) { // on or past the deadline
-      return { name: 'red', emoji: '🔴', calColor: CalendarApp.EventColor.RED };
-    }
-  } else {
-    if (daysBefore < 0) {  // strictly past the deadline
-      return { name: 'red', emoji: '🔴', calColor: CalendarApp.EventColor.RED };
-    }
-  }
-
-  if (daysBefore <= CONFIG.yellowWindowDays) {
-    return { name: 'yellow', emoji: '🟡', calColor: CalendarApp.EventColor.YELLOW };
-  }
-
-  return { name: 'green', emoji: '🟢', calColor: CalendarApp.EventColor.GREEN };
-}
 
 /***** CONFIG *****/
 const CONFIG = {
   calendarId: 'c_b697a80ae3fb9a9918f40ffdb570a633f9d2286db89a65123374589206aa3ea6@group.calendar.google.com',
   sheetName: null,                // null = active sheet
   headerRow: 1,
-  deadlineTaskLabel: 'Project Deadline',
   eventIdHeader: 'Event ID',
   lastSyncedHeader: 'Last Synced',
-  deadlineHeader: 'Deadline',
   taskIdsHeader: 'Task IDs (JSON)',      // per-row: { "user@dom": "taskId", ... }
-  yellowWindowDays: 2,
-  onDeadlineIsRed: true,
 
   // Calendar behavior
   sendInvites: true,                      // email guests on create
   sendUpdatesOnChange: true,              // email on updates (needs Advanced Calendar API)
   defaultRemindersMins: [1440, 120],      // 24h & 2h popup reminders
-  addEmojiPrefix: true,                   // 🟢/🟡/🔴 prefix in event title
 
   // Google Tasks (DWD)
   createGoogleTasks: true,                // create personal tasks per assignee
@@ -92,32 +32,13 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('Project')
     .addItem('Sync to Calendar', 'syncTasksToCalendar')
-    .addItem('Refresh Deadline & Formatting', 'refreshDeadlineAndFormatting')
     .addItem('Open Sync Log', 'openSyncLog_')
     .addToUi();
-}
-
-/***** PUBLIC: refresh named range + conditional formatting only *****/
-function refreshDeadlineAndFormatting() {
-  const { sheet, headers } = getSheetAndHeaders_();
-  const locating = locateDeadline_(sheet, headers);
-  if (!locating.deadlineDate) {
-    SpreadsheetApp.getActive().toast('No Project Deadline row found (or no date).');
-    return;
-  }
-  ensureDeadlineNamedRange_(locating.deadlineRange);
-  ensureEndDateConditionalFormatting_(sheet, headers, locating.firstTaskRow);
-  SpreadsheetApp.getActive().toast('Deadline & conditional formatting updated.');
 }
 
 /***** MAIN SYNC *****/
 function syncTasksToCalendar() {
   const { sheet, headers, values, richValues } = getSheetAndHeaders_({ includeValues: true });
-  const locating = locateDeadline_(sheet, headers, values);
-
-  // Ensure named range & conditional formatting
-  if (locating.deadlineRange) ensureDeadlineNamedRange_(locating.deadlineRange);
-  ensureEndDateConditionalFormatting_(sheet, headers, locating.firstTaskRow);
 
   // Ensure helper columns
   const eventIdColIndex  = ensureColumn_(sheet, headers, CONFIG.eventIdHeader);
@@ -128,12 +49,12 @@ function syncTasksToCalendar() {
   if (!cal) throw new Error('Calendar not found. Check CONFIG.calendarId.');
 
   const tz = Session.getScriptTimeZone();
-  const startR = Math.max(locating.firstTaskRow, CONFIG.headerRow + 1);
+  const startR = CONFIG.headerRow + 1;
 
   for (let r = startR - 1; r < values.length; r++) {
     const row = values[r];
     const rawTitle = str_(row[headers['Task']]);
-    if (!rawTitle || equalsCI_(rawTitle, CONFIG.deadlineTaskLabel)) continue;
+    if (!rawTitle) continue;
 
     try {
       const start = toDate_(row[headers['Start Date']], tz);
@@ -145,27 +66,13 @@ function syncTasksToCalendar() {
 
       const endExclusive = addDays_(endInclusive, 1);
 
-      // Row-level or project deadline
-      const rowDeadlineCell = headers[CONFIG.deadlineHeader] != null ? row[headers[CONFIG.deadlineHeader]] : '';
-      const projectDeadline = locating.deadlineDate;
-      const rowDeadline = isDate_(rowDeadlineCell) ? stripTime_(new Date(rowDeadlineCell)) : projectDeadline;
-
-      const daysBefore = rowDeadline ? daysBefore_(endInclusive, rowDeadline) : null;
-      const colorInfo = decideColor_(daysBefore);
-      const titleForEvent = CONFIG.addEmojiPrefix ? `${colorInfo.emoji} ${rawTitle}` : rawTitle;
-
       const dependsOn = str_(row[headers['Depends On']]);
       const status    = str_(row[headers['Status']]);
       const notes     = str_(row[headers['Notes']]);
 
-      let description = buildDescription_({ dependsOn, status, notes });
-      if (rowDeadline) {
-        description += (description ? '\n' : '') +
-          `Deadline (${isDate_(rowDeadlineCell) ? 'Row' : 'Project'}): ${Utilities.formatDate(rowDeadline, tz, 'yyyy-MM-dd')}\n` +
-          `Days before deadline: ${daysBefore}`;
-      }
+      const description = buildDescription_({ dependsOn, status, notes });
 
-      // ✅ People-chips + plain emails
+      // Parse @Person mentions + plain emails
       const assigneeRaw  = row[headers['Assigned To (email)']];
       const assigneeRich = richValues ? richValues[r][headers['Assigned To (email)']] : null;
       const guestEmails  = dedupEmails_(extractEmailsFromCell_(str_(assigneeRaw), assigneeRich));
@@ -176,12 +83,11 @@ function syncTasksToCalendar() {
       const event = upsertAllDayEvent_({
         cal,
         existingEventId,
-        title: titleForEvent,
+        title: rawTitle,
         start,
         endExclusive,
         description,
-        guestEmails,
-        colorInfo
+        guestEmails
       });
 
       // Save event id & stamp
@@ -193,16 +99,17 @@ function syncTasksToCalendar() {
       if (CONFIG.createGoogleTasks && guestEmails.length) {
         const updatedMap = upsertTasksForAssignees_({
           assignees: guestEmails,
-          baseTitle: rawTitle, // No emoji in personal task
+          baseTitle: rawTitle,
           dueDate: endInclusive,
           sheetName: sheet.getName(),
           eventId: event.getId(),
+          notes: notes,
           existingMap
         });
         sheet.getRange(r + 1, taskIdsColIndex + 1).setValue(JSON.stringify(updatedMap));
       }
 
-      log_('upsert', r + 1, rawTitle, event.getId(), `color=${colorInfo.name}; guests=${guestEmails.join(',')}`);
+      log_('upsert', r + 1, rawTitle, event.getId(), `guests=${guestEmails.join(',')}`);
     } catch (e) {
       log_('error', r + 1, str_(values[r][headers['Task']]), '', e && e.message ? e.message : String(e));
     }
@@ -211,8 +118,8 @@ function syncTasksToCalendar() {
   SpreadsheetApp.getActive().toast('Calendar sync complete.');
 }
 
-/***** EVENT UPSERT (invites, reminders, color, sendUpdates) *****/
-function upsertAllDayEvent_({ cal, existingEventId, title, start, endExclusive, description, guestEmails, colorInfo }) {
+/***** EVENT UPSERT (invites, reminders) *****/
+function upsertAllDayEvent_({ cal, existingEventId, title, start, endExclusive, description, guestEmails }) {
   let event = existingEventId ? cal.getEventById(existingEventId) : null;
 
   if (!event) {
@@ -232,7 +139,6 @@ function upsertAllDayEvent_({ cal, existingEventId, title, start, endExclusive, 
 
   event.removeAllReminders();
   (CONFIG.defaultRemindersMins || []).forEach(m => event.addPopupReminder(m));
-  event.setColor(colorInfo.calColor);
 
   // send update emails (Advanced Calendar API)
   if (CONFIG.sendUpdatesOnChange) {
@@ -246,7 +152,7 @@ function upsertAllDayEvent_({ cal, existingEventId, title, start, endExclusive, 
 }
 
 /***** TASKS (DWD) *****/
-function upsertTasksForAssignees_({ assignees, baseTitle, dueDate, sheetName, eventId, existingMap }) {
+function upsertTasksForAssignees_({ assignees, baseTitle, dueDate, sheetName, eventId, notes, existingMap }) {
   const updated = { ...(existingMap || {}) };
   const listName = CONFIG.tasksListNameTemplate.replace('{{SHEET_NAME}}', sheetName || 'Project');
 
@@ -254,7 +160,7 @@ function upsertTasksForAssignees_({ assignees, baseTitle, dueDate, sheetName, ev
     try {
       const token = getSATokenForUser_(email, 'https://www.googleapis.com/auth/tasks');
       const listId = ensureTasksListForUser_(token, listName);
-      const notes = `Linked calendar event:\nhttps://calendar.google.com/calendar/u/0/r/eventedit/${encodeURIComponent(eventId)}`;
+      const taskNotes = `${notes ? notes + '\n\n' : ''}Linked calendar event:\nhttps://calendar.google.com/calendar/u/0/r/eventedit/${encodeURIComponent(eventId)}`;
       const dueISO = toDueISO_(dueDate);
 
       const existingTaskId = updated[email];
@@ -265,15 +171,15 @@ function upsertTasksForAssignees_({ assignees, baseTitle, dueDate, sheetName, ev
           headers: { Authorization: `Bearer ${token}` },
           contentType: 'application/json',
           muteHttpExceptions: true,
-          payload: JSON.stringify({ title: baseTitle, notes, due: dueISO, status: 'needsAction' })
+          payload: JSON.stringify({ title: baseTitle, notes: taskNotes, due: dueISO, status: 'needsAction' })
         });
         if (res.getResponseCode() === 404) {
-          updated[email] = insertTask_(token, listId, baseTitle, notes, dueDate);
+          updated[email] = insertTask_(token, listId, baseTitle, taskNotes, dueDate);
         } else if (res.getResponseCode() !== 200) {
           log_('task_error', 0, baseTitle, '', `PATCH ${email}: ${res.getResponseCode()} ${res.getContentText()}`);
         }
       } else {
-        updated[email] = insertTask_(token, listId, baseTitle, notes, dueDate);
+        updated[email] = insertTask_(token, listId, baseTitle, taskNotes, dueDate);
       }
     } catch (e) {
       log_('task_error', 0, baseTitle, '', `${email}: ${e && e.message ? e.message : e}`);
@@ -330,13 +236,12 @@ function ensureTasksListForUser_(token, listName) {
 function getSATokenForUser_(userEmail, scope) {
   const props = PropertiesService.getScriptProperties();
   const clientEmail = props.getProperty('SA_CLIENT_EMAIL');
-  let privateKey = props.getProperty('SA_PRIVATE_KEY'); // can be real PEM or one-line with \n
+  let privateKey = props.getProperty('SA_PRIVATE_KEY');
   if (!clientEmail || !privateKey) {
     throw new Error('Missing SA_CLIENT_EMAIL or SA_PRIVATE_KEY in Script Properties');
   }
 
   // Normalize escaped newlines if the key was stored as a single line
-  // e.g., "-----BEGIN...-----\nMIIE...==\n-----END PRIVATE KEY-----\n"
   privateKey = privateKey.replace(/\\n/g, '\n');
 
   const now = Math.floor(Date.now() / 1000);
@@ -381,22 +286,8 @@ function getAdminDirectoryToken_() {
   return getSATokenForUser_(admin, 'https://www.googleapis.com/auth/admin.directory.user.readonly');
 }
 
-// Basic sanity check: can we list any users?
-function test_DirectoryPing() {
-  const token = getAdminDirectoryToken_();
-  const url = 'https://admin.googleapis.com/admin/directory/v1/users'
-            + '?customer=my_customer&maxResults=5&viewType=admin_view'
-            + '&fields=users(primaryEmail,name/fullName)';
-  const res = UrlFetchApp.fetch(url, { headers: { Authorization: `Bearer ${token}` }, muteHttpExceptions: true });
-  Logger.log(res.getResponseCode());
-  Logger.log(res.getContentText());
-}
-
 /**
  * Normalize display text from a chip cell to a set of candidate names.
- * - strips @
- * - splits by commas/semicolons/newlines
- * - collapses spaces
  */
 function _normalizeDisplayNames_(displayText) {
   if (!displayText) return [];
@@ -409,8 +300,6 @@ function _normalizeDisplayNames_(displayText) {
 
 /**
  * Resolve one or more display names to emails via Admin Directory.
- * Uses the correct "query" param, admin_view, and customer=my_customer.
- * Prefers exact fullName match; falls back to first result.
  */
 function findDirectoryEmailsByName_(displayText) {
   const names = _normalizeDisplayNames_(displayText);
@@ -421,7 +310,6 @@ function findDirectoryEmailsByName_(displayText) {
   const out = new Set();
 
   names.forEach(name => {
-    // Try quoted full-name first (exact-ish), then unquoted if needed
     const queries = [
       `name:"${name}"`,
       `name:${name}`
@@ -439,7 +327,6 @@ function findDirectoryEmailsByName_(displayText) {
           continue;
         }
         const users = (JSON.parse(res.getContentText()).users || []);
-        // prefer exact case-insensitive fullName match; else take first
         found = users.find(u => ((u.name && u.name.fullName) || '').toLowerCase() === name.toLowerCase()) || users[0];
       } catch (e) {
         log_('dir_error', 0, name, '', String(e));
@@ -451,85 +338,6 @@ function findDirectoryEmailsByName_(displayText) {
   });
 
   return Array.from(out);
-}
-
-/***** DEADLINE LOCATOR *****/
-function locateDeadline_(sheet, headers, valuesOpt) {
-  const values = valuesOpt || sheet.getDataRange().getValues();
-  const taskCol = headers['Task'];
-  const startCol = headers['Start Date'];
-  const endCol = headers['End Date'];
-
-  let deadlineRow = null;
-  for (let i = CONFIG.headerRow; i < values.length; i++) {
-    const cell = str_(values[i][taskCol]);
-    if (equalsCI_(cell, CONFIG.deadlineTaskLabel)) { deadlineRow = i + 1; break; } // 1-based
-  }
-
-  let firstTaskRow = CONFIG.headerRow + 1;
-  let deadlineDate = null;
-  let deadlineRange = null;
-
-  if (deadlineRow) {
-    firstTaskRow = Math.max(firstTaskRow, deadlineRow + 1);
-    const endVal = values[deadlineRow - 1][endCol];
-    const startVal = values[deadlineRow - 1][startCol];
-    deadlineDate = isDate_(endVal) ? stripTime_(new Date(endVal)) :
-                   isDate_(startVal) ? stripTime_(new Date(startVal)) : null;
-
-    const colIndexForRange = isDate_(endVal) ? endCol : startCol;
-    if (deadlineDate != null) deadlineRange = sheet.getRange(deadlineRow, colIndexForRange + 1, 1, 1);
-  }
-
-  return { deadlineRow, firstTaskRow, deadlineDate, deadlineRange };
-}
-
-/***** NAMED RANGE *****/
-function ensureDeadlineNamedRange_(range) {
-  if (!range) return;
-  const ss = SpreadsheetApp.getActive();
-  const name = 'DEADLINE';
-  const existing = ss.getNamedRanges().find(nr => nr.getName() === name);
-  if (existing) existing.setRange(range);
-  else ss.setNamedRange(name, range);
-}
-
-/***** CONDITIONAL FORMATTING (End Date with per-row Deadline) *****/
-function ensureEndDateConditionalFormatting_(sheet, headers, firstTaskRow) {
-  ensureColumn_(sheet, headers, CONFIG.deadlineHeader);
-
-  const endColIdx1 = headers['End Date'] + 1;           // 1-based
-  const dlColIdx1  = headers[CONFIG.deadlineHeader] + 1;
-  const endColLtr  = colLetter_(endColIdx1);
-  const dlColLtr   = colLetter_(dlColIdx1);
-
-  const maxRow = sheet.getMaxRows();
-  const range = sheet.getRange(firstTaskRow, endColIdx1, maxRow - firstTaskRow + 1, 1);
-
-  const r = firstTaskRow; // anchor row
-  const rowDl = `IF($${dlColLtr}${r}="", DEADLINE, $${dlColLtr}${r})`;
-  const y = CONFIG.yellowWindowDays;
-  const yellowUpperOp = CONFIG.onDeadlineIsRed ? '<' : '<=';
-  const redOp = CONFIG.onDeadlineIsRed ? '>=' : '>';
-
-  const greenFormula  = `=AND($${endColLtr}${r}<>"", $${endColLtr}${r} < (${rowDl} - ${y}))`;
-  const yellowFormula = `=AND($${endColLtr}${r}<>"", $${endColLtr}${r} >= (${rowDl} - ${y}), $${endColLtr}${r} ${yellowUpperOp} ${rowDl})`;
-  const redFormula    = `=AND($${endColLtr}${r}<>"", $${endColLtr}${r} ${redOp} ${rowDl})`;
-
-  const existing = sheet.getConditionalFormatRules() || [];
-  const filtered = existing.filter(rule => {
-    const rgn = rule.getRanges ? rule.getRanges() : [];
-    const same = rgn.some(g =>
-      g.getA1Notation() === range.getA1Notation() && g.getSheet().getSheetId() === sheet.getSheetId()
-    );
-    return !same;
-  });
-
-  const green = SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied(greenFormula).setBackground('#34a853').setRanges([range]).build();
-  const yellow = SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied(yellowFormula).setBackground('#fbbc04').setRanges([range]).build();
-  const red = SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied(redFormula).setBackground('#ea4335').setRanges([range]).build();
-
-  sheet.setConditionalFormatRules(filtered.concat([green, yellow, red]));
 }
 
 /***** UTIL & LOG *****/
@@ -545,14 +353,14 @@ function getSheetAndHeaders_(opts = {}) {
   headerVals.forEach((h, i) => { const key = str_(h); if (key) headers[key] = i; });
 
   ['Task','Depends On','Start Date','Duration (days)','End Date','Assigned To (email)','Status','Notes',
-   CONFIG.deadlineHeader, CONFIG.taskIdsHeader, CONFIG.eventIdHeader, CONFIG.lastSyncedHeader]
+   CONFIG.taskIdsHeader, CONFIG.eventIdHeader, CONFIG.lastSyncedHeader]
     .forEach(n => { if (headers[n] == null) headers[n] = ensureColumn_(sheet, headers, n); });
 
   const dataRange = sheet.getDataRange();
   const values = opts.includeValues ? dataRange.getValues() : null;
-  const richValues = opts.includeValues ? dataRange.getRichTextValues() : null;   //  👈 add this
+  const richValues = opts.includeValues ? dataRange.getRichTextValues() : null;
 
-  return { sheet, headers, values, richValues };                                    //  👈 and return it
+  return { sheet, headers, values, richValues };
 }
 
 function ensureColumn_(sheet, headers, name) {
@@ -577,7 +385,7 @@ function str_(v) {
 function extractEmailsFromCell_(rawText, rich) {
   const out = new Set();
 
-  // 1) Try RichText runs (chips/links)
+  // 1) Try RichText runs (chips/links) - this handles @Person mentions
   if (rich && typeof rich.getText === 'function') {
     try {
       if (typeof rich.getRuns === 'function') {
@@ -615,15 +423,12 @@ function isDate_(v){ return v && Object.prototype.toString.call(v) === '[object 
 function toDate_(v, tz){ if (isDate_(v)) return stripTime_(new Date(v)); const d=new Date(v); return isNaN(d)?null:stripTime_(d); }
 function stripTime_(d){ return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
 function addDays_(d, n){ const x=new Date(d); x.setDate(x.getDate()+n); return stripTime_(x); }
-function daysBefore_(endInclusive, deadline){ const e=stripTime_(endInclusive); const dl=stripTime_(deadline); return Math.floor((dl - e)/(1000*60*60*24)); }
 function buildDescription_({ dependsOn, status, notes }) { const p=[]; if (dependsOn) p.push(`Depends On: ${dependsOn}`); if (status) p.push(`Status: ${status}`); if (notes) p.push(`Notes: ${notes}`); return p.join('\n'); }
 function parseEmails_(s){ if (!s) return []; return s.split(/[,; ]+/).map(x=>x.trim()).filter(x=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x)); }
-function colLetter_(n){ let s=''; while(n>0){const m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=Math.floor((n-1)/26);} return s; }
 
 function parseJsonSafe_(v){ try{ return v ? JSON.parse(v) : null; } catch { return null; } }
 
 function toDueISO_(d) {
-  // d is a date with local time cleared by your helpers; make an exact UTC midnight
   return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())).toISOString();
 }
 
@@ -637,30 +442,70 @@ function log_(action, row, task, eventId, note) {
   const ss = SpreadsheetApp.getActive();
   const name = 'Sync Log';
   const sh = ss.getSheetByName(name) || ss.insertSheet(name);
-  if (sh.getLastRow() === 0) sh.getRange(1,1,1,6).setValues([['When','Action','Row','Task','Event ID','Notes']]);
+  if (sh.getLastRow() === 0) sh.getRange(1,1,1,5).setValues([['When','Action','Row','Task','Event ID','Notes']]);
   sh.appendRow([new Date(), action, row, task, eventId || '', note || '']);
 }
 function openSyncLog_(){ const sh = SpreadsheetApp.getActive().getSheetByName('Sync Log'); if (sh) SpreadsheetApp.setActiveSheet(sh); }
 
-/************ QUICK TESTS ************/
+/************ TEST FUNCTIONS ************/
 
-// 0) Test people chip parsing for a specific row
+// Test service account key validity
+function test_ServiceAccountKey() {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const clientEmail = props.getProperty('SA_CLIENT_EMAIL');
+    const privateKey = props.getProperty('SA_PRIVATE_KEY');
+    if (!clientEmail || !privateKey) {
+      throw new Error('Missing SA_CLIENT_EMAIL or SA_PRIVATE_KEY in Script Properties');
+    }
+
+    Logger.log('Client Email: ' + clientEmail);
+
+    const normalizedKey = privateKey.replace(/\\n/g, '\n');
+    const hasEscaped = privateKey.indexOf('\\n') !== -1;
+    const hasReal = normalizedKey.indexOf('\n') !== -1;
+
+    Logger.log('Escaped \\n detected: ' + hasEscaped);
+    Logger.log('Contains real newlines: ' + hasReal);
+    Logger.log('Key length: ' + normalizedKey.length);
+
+    const token = getSATokenForUser_(Session.getActiveUser().getEmail(), 'https://www.googleapis.com/auth/tasks');
+    Logger.log('Access token retrieved successfully (first 100 chars): ' + token.substring(0, 100));
+
+    Logger.log('✅ Service account key works and token exchange succeeded.');
+  } catch (e) {
+    Logger.log('❌ Service account key test failed: ' + e.message);
+  }
+}
+
+// Test Admin Directory API access
+function test_DirectoryPing() {
+  const token = getAdminDirectoryToken_();
+  const url = 'https://admin.googleapis.com/admin/directory/v1/users'
+            + '?customer=my_customer&maxResults=5&viewType=admin_view'
+            + '&fields=users(primaryEmail,name/fullName)';
+  const res = UrlFetchApp.fetch(url, { headers: { Authorization: `Bearer ${token}` }, muteHttpExceptions: true });
+  Logger.log(res.getResponseCode());
+  Logger.log(res.getContentText());
+}
+
+// Test @Person chip parsing for a specific row
 function test_AssigneeChipParsing(rowNumber1Based) {
   const { headers, values, richValues } = getSheetAndHeaders_({ includeValues: true });
-  const r = (rowNumber1Based || (CONFIG.headerRow + 2)) - 1; // default: first task row
+  const r = (rowNumber1Based || (CONFIG.headerRow + 2)) - 1;
   const raw  = values[r][headers['Assigned To (email)']];
   const rich = richValues[r][headers['Assigned To (email)']];
   const emails = extractEmailsFromCell_(str_(raw), rich);
   Logger.log(JSON.stringify({ row: rowNumber1Based || (r + 1), emails }));
 }
 
-// 0b) Test: directory lookup by name string(s)
+// Test directory lookup by name
 function test_DirectoryLookupByName() {
   const emails = findDirectoryEmailsByName_('Chad Stolle; Spencer Lott');
   Logger.log(JSON.stringify(emails));
 }
 
-// 1) DWD test: list Tasks lists as the active user (or hardcode a user)
+// Test Tasks impersonation
 function test_TasksImpersonation() {
   const user = Session.getActiveUser().getEmail();
   const token = getSATokenForUser_(user, 'https://www.googleapis.com/auth/tasks');
@@ -671,7 +516,7 @@ function test_TasksImpersonation() {
   Logger.log(r.getContentText());
 }
 
-// 2) DWD test: create a task in "Project: Test" due tomorrow
+// Test creating a task
 function test_CreateTaskForUser() {
   const user = Session.getActiveUser().getEmail();
   const token = getSATokenForUser_(user, 'https://www.googleapis.com/auth/tasks');
@@ -702,7 +547,7 @@ function test_CreateTaskForUser() {
       headers: { Authorization: `Bearer ${token}` },
       contentType: 'application/json',
       payload: JSON.stringify({
-        title: 'DWD test task',
+        title: 'Test task',
         notes: 'Created via service account impersonation.',
         due: new Date(due.getFullYear(), due.getMonth(), due.getDate()).toISOString()
       })
@@ -711,7 +556,7 @@ function test_CreateTaskForUser() {
   Logger.log(`Created task id: ${task.id}`);
 }
 
-// 3) Calendar test (as Apps Script user, not SA)
+// Test calendar event creation
 function test_CreateCalendarEvent() {
   const cal = CalendarApp.getCalendarById(CONFIG.calendarId);
   const start = new Date(); const end = new Date(start); end.setDate(end.getDate() + 1);
