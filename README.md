@@ -1,61 +1,47 @@
-# 📊 Google Sheets Project Management with Calendar & Tasks Sync
+# 📋 Google Sheets Task Assignment with Calendar Sync
 
-> Transform Google Sheets into a powerful project management tool with automatic calendar events and personal task assignments
+> Assign tasks using @Person mentions in Google Sheets and automatically sync to a shared calendar
 
 ## 🎯 What This Does
 
-This Google Apps Script turns any Google Sheet into a complete project management system by automatically:
+This Google Apps Script syncs tasks from Google Sheets to Google Calendar using the built-in `@Person` mentions (Smart Chips) for task assignment:
 
-- **Creating calendar events** for each task with color-coded urgency indicators (🟢 on track, 🟡 approaching deadline, 🔴 overdue)
-- **Sending calendar invites** to all team members assigned to tasks
-- **Creating personal Google Tasks** for each team member with their assigned work
-- **Managing project deadlines** with automatic conditional formatting
-- **Tracking all changes** in a sync log for full transparency
+- **Creates calendar events** for each task on a shared calendar
+- **Sends calendar invites** to people assigned via `@Person` mentions
+- **Creates personal Google Tasks** for each assignee with task details
+- **Tracks all changes** in a sync log for transparency
 
 ### 💡 Perfect For:
 
-- Project managers coordinating team timelines
-- Department heads managing cross-functional initiatives  
-- Teams collaborating on multi-phase projects
-- Anyone who wants their spreadsheet tasks to automatically sync to calendars and task lists
+- Project managers coordinating team tasks
+- Teams collaborating on projects with a shared calendar
+- Anyone who wants spreadsheet tasks to sync to calendars automatically
 
 ---
 
 ## ✨ Key Features
 
-### 📅 Smart Calendar Integration
-- Automatic event creation with task details, dependencies, and status
-- **Color-coded by urgency**: 
-  - 🟢 **Green**: More than 2 days before deadline
-  - 🟡 **Yellow**: Within 2 days of deadline
-  - 🔴 **Red**: At or past deadline
-- Email notifications to assignees when events are created or updated
+### 📅 Calendar Event Creation
+- Creates all-day events with task name, dates, and details
+- Automatically invites all assigned people
 - Customizable reminders (default: 24 hours and 2 hours before)
 
-### ✅ Personal Task Management
-- Creates individual Google Tasks for each team member
-- Tasks appear in each person's Google Tasks list
-- Links back to calendar events for full context
-- Automatically updates when sheet changes
-
-### 👥 Flexible Assignee Input
-You can assign tasks using any of these methods:
-- **Email addresses**: `john@company.com`
+### 👥 Easy Assignment with @Person
+Assign tasks by typing `@` and selecting a person:
 - **People chips**: `@John Doe` (Google Sheets smart chips)
-- **Display names**: `John Doe` (automatically looks up email via Google Directory)
-- **Multiple assignees**: `john@company.com; jane@company.com` or `@John Doe, @Jane Smith`
+- **Email addresses**: `john@company.com`
+- **Multiple assignees**: `@John Doe, @Jane Smith` or `john@company.com; jane@company.com`
 
-### ⏰ Deadline Management
-- Set a project-wide deadline OR per-task deadlines
-- Automatic conditional formatting on End Date column
-- Visual deadline proximity indicators
-- Named range support for easy formula referencing
+### ✅ Personal Google Tasks
+- Creates individual Google Tasks for each assignee
+- Tasks include: task name, due date, and notes
+- Links back to calendar events for context
+- Automatically updates when sheet changes
 
 ### 📊 Full Transparency
 - **Sync Log sheet**: Records every sync operation with timestamps
 - Event IDs and Task IDs stored in the sheet for tracking
 - Error logging for failed operations
-- Warnings for unresolvable names or emails
 
 ---
 
@@ -63,7 +49,7 @@ You can assign tasks using any of these methods:
 
 ### Step 1: Set Up Your Google Sheet
 
-Create a sheet with these columns (or use your existing project sheet):
+Create a sheet with these columns:
 
 | Column Name | Description | Required | Example |
 |------------|-------------|----------|---------|
@@ -71,13 +57,10 @@ Create a sheet with these columns (or use your existing project sheet):
 | **Start Date** | When task begins | ✅ Yes | 2025-01-15 |
 | **End Date** | When task ends | Recommended | 2025-01-20 |
 | **Duration (days)** | Used if no End Date | Optional | 5 |
-| **Assigned To (email)** | Who's responsible | Recommended | john@company.com or @John Doe |
+| **Assigned To (email)** | Who's responsible (use @Person) | Recommended | @John Doe |
 | **Depends On** | Prerequisites | Optional | "Task 1, Task 2" |
 | **Status** | Current state | Optional | "In Progress" |
-| **Notes** | Additional details | Optional | "Needs approval from design team" |
-| **Deadline** | Task-specific deadline | Optional | 2025-01-25 |
-
-**Optional Project Deadline**: Add a row with Task = "Project Deadline" and set the End Date. This becomes the default deadline for all tasks.
+| **Notes** | Additional details | Optional | "Needs approval" |
 
 ### Step 2: Install the Apps Script
 
@@ -106,7 +89,7 @@ calendarId: 'your-calendar-id@group.calendar.google.com',
 
 #### B. Set Up Service Account (For Tasks & Directory)
 
-This script uses Google Workspace Domain-Wide Delegation to create personal tasks. You'll need:
+This script uses Google Workspace Domain-Wide Delegation to create personal tasks:
 
 1. **Create a Service Account**:
    - Go to [Google Cloud Console](https://console.cloud.google.com)
@@ -150,14 +133,8 @@ In Apps Script editor:
 Run these test functions from Apps Script to verify everything works:
 
 1. **Test Service Account**: Run `test_ServiceAccountKey()`
-   - Check **Execution log** for ✅ success message
 2. **Test Directory API Access**: Run `test_DirectoryPing()`
-   - Should return HTTP 200 and list of users
-   - If 403, enable Admin SDK API in GCP and Advanced Service in Apps Script
 3. **Test Tasks Access**: Run `test_TasksImpersonation()`
-   - Should list your Google Tasks lists
-4. **Test Directory Lookup**: Run `test_DirectoryLookupByName()`
-   - Update with actual names from your organization first
 
 ### Step 5: First Sync
 
@@ -167,7 +144,7 @@ Run these test functions from Apps Script to verify everything works:
 4. Grant permissions when prompted
 5. Wait for the "Calendar sync complete" notification
 
-🎉 **Done!** Check your calendar and Google Tasks to see your project tasks!
+🎉 **Done!** Check your shared calendar and Google Tasks!
 
 ---
 
@@ -175,58 +152,28 @@ Run these test functions from Apps Script to verify everything works:
 
 ### Daily Workflow
 
-1. **Update your sheet** with new tasks, dates, or assignees
-2. **Run sync**: Click **Project** > **Sync to Calendar**
-3. **Team members automatically get**:
-   - Calendar event invitations
+1. **Add tasks** to your sheet with task name, dates, and notes
+2. **Assign people** using `@Person` mentions in the "Assigned To (email)" column
+3. **Run sync**: Click **Project** > **Sync to Calendar**
+4. **Assignees automatically get**:
+   - Calendar event invitations on the shared calendar
    - Personal tasks in their Google Tasks list
-4. **Check the Sync Log** sheet for detailed sync history
+5. **Check the Sync Log** sheet for sync history
 
-### Understanding the Color Codes
+### Task Information Synced
 
-The script automatically assigns colors based on how close tasks are to their deadline:
-
-- 🟢 **Green (On Track)**: Task ends more than 2 days before deadline
-- 🟡 **Yellow (Approaching)**: Task ends within 2 days of deadline  
-- 🔴 **Red (Urgent)**: Task is at or past deadline
-
-**Customize**: Change `yellowWindowDays` and `onDeadlineIsRed` in the `CONFIG` section.
-
-### Conditional Formatting
-
-The End Date column automatically highlights based on proximity to deadline:
-- Green background = safe
-- Yellow background = approaching
-- Red background = overdue
-
-Refresh formatting: **Project** > **Refresh Deadline & Formatting**
-
-### Managing Assignees
-
-**Multiple ways to assign tasks:**
-
-```
-Simple email:           john@company.com
-Multiple emails:        john@company.com; jane@company.com
-People chips:           @John Doe
-Mix of both:            @John Doe, jane@company.com
-Display names only:     John Doe; Jane Smith
-```
-
-The script intelligently resolves all of these to email addresses.
-
-### Per-Task Deadlines
-
-If you need different deadlines for specific tasks:
-1. The **Deadline** column is automatically created on first sync
-2. Enter a date in this column for any task
-3. That task will use its own deadline instead of the project deadline
+Each task includes:
+- **Task name** - The title of the event/task
+- **Assigned person** - Invited to the calendar event
+- **Due date** - End date of the task
+- **Notes** - Included in event description and task notes
+- **Status & Dependencies** - Added to event description
 
 ---
 
 ## ⚙️ Configuration Options
 
-Edit the `CONFIG` object in `code.gs` to customize behavior:
+Edit the `CONFIG` object in `code.gs`:
 
 ```javascript
 const CONFIG = {
@@ -235,11 +182,6 @@ const CONFIG = {
   sendInvites: true,                    // Email guests on create
   sendUpdatesOnChange: true,            // Email guests on updates
   defaultRemindersMins: [1440, 120],    // 24h and 2h reminders
-  addEmojiPrefix: true,                 // Add 🟢🟡🔴 to event titles
-  
-  // Color thresholds
-  yellowWindowDays: 2,                  // Yellow within X days of deadline
-  onDeadlineIsRed: true,                // Red on deadline day (vs. after)
   
   // Google Tasks
   createGoogleTasks: true,              // Create personal tasks
@@ -247,8 +189,7 @@ const CONFIG = {
   
   // Sheet structure
   sheetName: null,                      // null = active sheet
-  headerRow: 1,                         // Row number with column headers
-  deadlineTaskLabel: 'Project Deadline' // Task name for project deadline row
+  headerRow: 1                          // Row number with column headers
 };
 ```
 
@@ -258,110 +199,46 @@ const CONFIG = {
 
 ### Test Functions
 
-Run these from the Apps Script editor to diagnose issues:
-
 | Function | Purpose |
 |----------|---------|
-| `test_ServiceAccountKey()` | Verify service account credentials are valid |
-| `test_DirectoryPing()` | Basic check: can we list any users from Admin Directory? |
-| `test_TasksImpersonation()` | Test access to Google Tasks for current user |
-| `test_CreateTaskForUser()` | Create a test task due tomorrow |
+| `test_ServiceAccountKey()` | Verify service account credentials |
+| `test_DirectoryPing()` | Check Admin Directory API access |
+| `test_TasksImpersonation()` | Test Google Tasks access |
+| `test_AssigneeChipParsing(row)` | Test @Person parsing for a row |
 | `test_CreateCalendarEvent()` | Create a test calendar event |
-| `test_AssigneeChipParsing(rowNumber)` | Test email extraction for a specific row |
-| `test_DirectoryLookupByName()` | Test name-to-email resolution (update names first) |
 
 ### Common Issues
 
 **❌ "Missing SA_CLIENT_EMAIL or SA_PRIVATE_KEY"**
 - Go to Apps Script > Project Settings > Script Properties
 - Make sure all three properties are set correctly
-- Check that private key includes the full `-----BEGIN PRIVATE KEY-----` header
 
 **❌ "Calendar not found"**
 - Verify `CONFIG.calendarId` matches your target calendar
-- Make sure the service account has been invited to the calendar with "Make changes to events" permission
+- Make sure users are invited to the shared calendar
 
 **❌ "Token exchange failed"**
-- Verify Domain-Wide Delegation is set up in Google Workspace Admin
-- Check that all three OAuth scopes are authorized
-- Confirm `ADMIN_IMPERSONATE_EMAIL` is a valid admin user
+- Verify Domain-Wide Delegation is set up
+- Check that all OAuth scopes are authorized
 
-**❌ "No user match" in Sync Log**
-- The display name couldn't be found in Google Directory
-- Try using email addresses or People chips instead
-- Verify the person exists in your Google Workspace organization
-
-**❌ Tasks not creating**
-- External users (outside your domain) cannot receive Google Tasks
-- They will still get calendar invites
-- Check Sync Log for "task_error" entries
-
-**⚠️ Sync seems slow**
-- Normal for large sheets (100+ rows)
-- The script makes API calls for each assignee and task
-- Consider breaking very large projects into multiple sheets
+**❌ "@Person not recognized"**
+- The script will try to resolve names via Admin Directory
+- If that fails, use email addresses directly
 
 ---
 
 ## 🔒 Privacy & Security
 
 - **Service Account**: Has delegated access only to specified scopes
-- **User Data**: Email addresses and names are only used for calendar/task creation
-- **Audit Trail**: Sync Log records all operations for transparency
-- **External Users**: Cannot be impersonated (by design) - only receive calendar invites
-
----
-
-## 🛠️ Advanced Customization
-
-### Filtering External Users
-
-To skip Google Tasks creation for external users, add this helper:
-
-```javascript
-function isManagedDomainEmail_(email) {
-  return /@yourdomain\.com$/i.test(email); // Change to your domain
-}
-```
-
-Then in `syncTasksToCalendar()` after extracting emails:
-
-```javascript
-const managedAssignees = guestEmails.filter(isManagedDomainEmail_);
-if (CONFIG.createGoogleTasks && managedAssignees.length) {
-  // Use managedAssignees instead of guestEmails
-}
-```
-
-### Batch Performance Optimization
-
-For very large sheets, replace individual cell writes with batch operations at the end of the loop. Collect values in arrays and call `setValues()` once.
-
-### Custom Color Schemes
-
-Modify the `decideColor_()` function to use different colors or thresholds based on your preferences.
+- **User Data**: Email addresses used only for calendar/task creation
+- **Audit Trail**: Sync Log records all operations
 
 ---
 
 ## 📝 License
 
-This project is provided as-is for use within Google Workspace organizations. Modify and adapt as needed for your team.
+This project is provided as-is for use within Google Workspace organizations.
 
 ---
 
-## 🤝 Contributing
-
-Found a bug or have a feature request? Contributions and feedback are welcome!
-
----
-
-## 📞 Support
-
-For issues specific to:
-- **Google Workspace setup**: Contact your organization's Google Workspace admin
-- **Apps Script errors**: Check the Execution log in Apps Script editor
-- **Script functionality**: Review the Sync Log sheet in your Google Sheet
-
----
-
-**Made with ❤️ for project managers who love spreadsheets but need more automation**
+**Made with ❤️ for teams who love simple task assignment**
